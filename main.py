@@ -6,7 +6,6 @@ import pytz
 import yfinance as yf
 
 # --- [사용자 포트폴리오 데이터 - 환차 정밀 보정] ---
-# fx_base: 제공해주신 환차손익잔고 사진을 기반으로 역산한 매수 시점 환율입니다.
 OVERSEAS = [
     {"name": "테슬라(일)", "tk": "TSLA", "qty": 30.0, "avg": 380.3712, "inv": 16373841, "fx_base": 1417.8}, #
     {"name": "테슬라(소)", "tk": "TSLA", "qty": 1.809023, "avg": 397.5919, "inv": 1032056, "fx_base": 1416.5}, #
@@ -27,7 +26,6 @@ DOMESTIC_PENSION = [
 ]
 
 def get_report():
-    # 실시간 환율 및 KST 시간 설정
     rate_info = yf.Ticker("USDKRW=X").history(period="1d")
     curr_rate = rate_info['Close'].iloc[-1]
     now = datetime.now(pytz.timezone('Asia/Seoul')).strftime('%y.%m.%d %H:%M')
@@ -47,7 +45,6 @@ def get_report():
                 
                 if is_os:
                     eval_krw = price * s['qty'] * curr_rate
-                    # 환차익(원) = 현재외화가치 * (현재환율 - 매수환율)
                     fx_gain_krw = (price * s['qty']) * (curr_rate - s['fx_base'])
                     profit_krw = eval_krw - s['inv']
                     roi = profit_krw / s['inv'] * 100
