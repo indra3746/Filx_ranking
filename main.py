@@ -4,9 +4,9 @@ from datetime import datetime
 import pytz
 import yfinance as yf
 
-# --- [정밀 자산 데이터 반영] ---
+# --- [자산 데이터: 사진 기반 최종 정밀 업데이트] ---
 
-# 1. 종합계좌 - 해외주식 (소수점 정밀 합산)
+# 1. 종합계좌 - 해외주식 (소수점 합산)
 OVERSEAS_COMP = [
     {"name": "테슬라", "tk": "TSLA", "qty": 31.809023, "inv": 17405897},
     {"name": "BITX(비트코인2x)", "tk": "BITX", "qty": 187.943492, "inv": 17000000},
@@ -35,25 +35,27 @@ PENSION_SAVING = [
     {"name": "KODEX 미국S&P500", "tk": "379780", "qty": 808, "inv": 17307325}
 ]
 
-# 4. 퇴직연금(DC) - 최신 사진 데이터 반영
+# 4. 퇴직연금(DC) - 종목별 매입금 및 수량 정밀 수정
 RETIRE_DC = [
     {"name": "KODEX 미국반도체", "tk": "446770", "qty": 141, "inv": 4973775},
     {"name": "TIGER 반도체TOP10", "tk": "396500", "qty": 269, "inv": 4998020},
     {"name": "KODEX 미국서학개미", "tk": "480310", "qty": 345, "inv": 8552550},
     {"name": "TIGER 미국AI전력SMR", "tk": "483170", "qty": 768, "inv": 5689920},
     {"name": "KODEX 미국S&P500", "tk": "379780", "qty": 219, "inv": 4997580},
-    {"name": "미래에셋 TDF 2050", "tk": "CASH", "qty": 12426930, "inv": 12446360},
-    {"name": "미래에셋 현금성자산", "tk": "CASH", "qty": 765214, "inv": 765214}
+    {"name": "미래에셋 TDF 2050", "tk": "CASH", "qty": 12426930, "inv": 12446360}, #
+    {"name": "미래에셋 현금성자산", "tk": "CASH", "qty": 765214, "inv": 765214}   #
 ]
 
 def get_real_price(ticker):
     if ticker == "CASH": return 1.0
     try:
+        # 네이버 금융에서 실시간 종가 추출 (BS4 사용)
         url = f"https://finance.naver.com/item/main.naver?code={ticker}"
         res = requests.get(url, headers={'User-Agent': 'Mozilla/5.0'})
         from bs4 import BeautifulSoup
         soup = BeautifulSoup(res.text, 'html.parser')
-        price_tag = soup.find("p", {"class": "no_today"}).find("span", {"class": "blind"})
+        # 종가 위치: no_today 클래스 안의 blind 스팬
+        price_tag = soup.select_one(".no_today .blind")
         return float(price_tag.text.replace(',', ''))
     except: return None
 
