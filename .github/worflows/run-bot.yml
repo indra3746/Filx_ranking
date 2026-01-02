@@ -1,0 +1,28 @@
+name: 5-Minute Stock Report
+
+on:
+  schedule:
+    - cron: '*/5 * * * *' # 5분마다 자동 실행
+  workflow_dispatch: # 이 줄이 있어야 'Run workflow' 수동 버튼이 생깁니다
+
+jobs:
+  run-bot:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+
+      - name: Install dependencies
+        run: |
+          pip install requests yfinance pytz
+
+      - name: Execute script
+        env:
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+          CHAT_ID: ${{ secrets.CHAT_ID }}
+        run: python main.py
