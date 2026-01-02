@@ -19,7 +19,8 @@ jobs:
 
       - name: Install dependencies
         run: |
-          pip install requests yfinance pytz
+          python -m pip install --upgrade pip
+          pip install requests pytz yfinance finance-datareader pandas  # finance-datareader와 pandas 추가
 
       - name: Execute script
         env:
