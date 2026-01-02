@@ -1,9 +1,10 @@
 import os
 import requests
+import time
 from datetime import datetime
 import pytz
 import yfinance as yf
-import FinanceDataReader as fdr  # 한국 주식용 DB
+import FinanceDataReader as fdr
 
 # --- [사용자 데이터] ---
 OVERSEAS = [
@@ -18,17 +19,17 @@ OVERSEAS = [
 ]
 
 DOMESTIC_PENSION = [
-    {"name": "한화에어로", "tk": "012450", "qty": 20.0, "inv": 17997000}, # .KS 제거 (숫자만 사용)
+    {"name": "한화에어로", "tk": "012450", "qty": 20.0, "inv": 17997000},
     {"name": "하이닉스(소)", "tk": "000660", "qty": 0.727501, "inv": 419979},
     {"name": "KODEX S&P(연금)", "tk": "379780", "qty": 808.0, "inv": 17307325},
     {"name": "TIGER 반도체", "tk": "396500", "qty": 269.0, "inv": 4998020},
-    {"name": "미국AI전력SMR", "tk": "483170", "qty": 672.0, "inv": 4999680}
+    {"name": "미국AI전력SMR", "tk": "483170", "qty": 672.0, "inv": 4999680} # TIGER 미국AI전력핵심인프라
 ]
 
 def get_report():
-    # 1. 환율 가져오기 (Yahoo)
     try:
-        curr_rate = yf.Ticker("USDKRW=X").history(period="1d")['Close'].iloc[-1]
+        rate_info = yf.Ticker("USDKRW=X").history(period="1d")
+        curr_rate = rate_info['Close'].iloc[-1]
     except:
         curr_rate = 1400.0
 
@@ -44,55 +45,66 @@ def get_report():
         for s in asset_list:
             try:
                 if is_os:
-                    # 해외: Yahoo Finance 사용
                     price = yf.Ticker(s['tk']).history(period="1d")['Close'].iloc[-1]
-                    eval_krw = price * s['qty'] * curr_rate
-                    fx_gain_krw = (price * s['qty']) * (curr_rate - s['fx_base'])
-                    profit_krw = eval_krw - s['inv']
-                    status = f"{(profit_krw / s['inv'] * 100):+.2f}% (환차:{fx_gain_krw:+,.0f}원)"
                 else:
-                    # 국내: FinanceDataReader 사용 (네이버 금융 소스)
-                    # 최신 영업일 기준 10일치 데이터를 가져와 마지막 값을 사용
-                    df = fdr.DataReader(s['tk'])
-                    if df.empty: raise ValueError("No data")
-                    price = float(df['Close'].iloc[-1])
-                    eval_krw = price * s['qty']
-                    profit_krw = eval_krw - s['inv']
-                    status = f"{(profit_krw / s['inv'] * 100):+.2f}%"
+                    # 국내 주식: FinanceDataReader 시도, 실패 시 yfinance(.KS) 시도
+                    try:
+                        df = fdr.DataReader(s['tk'])
+                        price = float(df['Close'].iloc[-1])
+                    except:
+                        price = yf.Ticker(f"{s['tk']}.KS").history(period="1d")['Close'].iloc[-1]
 
-                emoji = "🔴" if profit_krw >= 0 else "🔵"
-                txt += f"{emoji} {s['name']}: {status}\n"
-                txt += f"    현재: {eval_krw:,.0f}원 ({profit_krw:+,.0f}원)\n"
-                
-                sub_inv += s['inv']
-                sub_eval += eval_krw
-            except Exception as e:
-                txt += f"⚠️ {s['name']} 로딩 실패 ({s['tk']})\n"
+                eval_krw = price * s['qty']
+                if is_os:
+                    eval_krw *= curr_rate
+                    fx_gain = (price * s['qty']) * (curr_rate - s['fx_base'])
+                    profit = eval_krw - s['inv']
+                    status = f"{(profit/s['inv']*100):+.2f}% (환차:{fx_gain:+,.0f}원)"
+                else:
+                    profit = eval_krw - s['inv']
+                    status = f"{(profit/s['inv']*100):+.2f}%"
+
+                txt += f"{'🔴' if profit >= 0 else '🔵'} {s['name']}: {status}\n"
+                txt += f"    현재: {eval_krw:,.0f}원 ({profit:+,.0f}원)\n"
+                sub_inv += s['inv']; sub_eval += eval_krw
+            except:
+                txt += f"⚠️ {s['name']} 로딩 실패\n"
 
         if sub_inv > 0:
-            roi = (sub_eval - sub_inv) / sub_inv * 100
-            txt += f"▶ 요약: {'🔺' if roi >= 0 else '🔻'} {roi:+.2f}% ({sub_eval-sub_inv:+,.0f}원)\n"
-            total_inv += sub_inv
-            total_eval += sub_eval
+            roi = (sub_eval-sub_inv)/sub_inv*100
+            txt += f"▶ 요약: {'🔺' if roi>=0 else '🔻'} {roi:+.2f}% ({sub_eval-sub_inv:+,.0f}원)\n"
+            total_inv += sub_inv; total_eval += sub_eval
         return txt
 
     report += process_assets("해외 주식 계좌", OVERSEAS, True)
-    report += process_assets("국내 및 연금 계좌", DOMESTIC_PENSION, False)
+    report += process_assets("국내 및 연금 계좌", DOMESTIC_PENSION)
     
     if total_inv > 0:
-        total_roi = (total_eval - total_inv) / total_inv * 100
+        total_roi = (total_eval-total_inv)/total_inv*100
         report += "\n━━━━━━━━━━━━━━━━━━\n"
-        report += f"{'🔥' if total_roi >= 0 else '❄️'} 통합 총 자산: {total_eval:,.0f}원\n"
-        report += f"💰 통합 총 손익: {total_eval-total_inv:+,.0f}원 ({total_roi:+.2f}%)\n"
-        
+        report += f"💰 통합 총 자산: {total_eval:,.0f}원\n"
+        report += f"📊 통합 총 손익: {total_eval-total_inv:+,.0f}원 ({total_roi:+.2f}%)\n"
     return report
 
 def send_msg(text):
+    print("--- [생성된 리포트 내용] ---")
+    print(text) # GitHub 로그에서 내용을 볼 수 있게 출력
+    
     token = os.environ.get('TELEGRAM_TOKEN')
     chat_id = os.environ.get('CHAT_ID')
-    if token and chat_id:
-        requests.post(f"https://api.telegram.org/bot{token}/sendMessage", 
-                     json={"chat_id": chat_id, "text": text})
+    
+    if not token or not chat_id:
+        print("❌ 에러: TELEGRAM_TOKEN 또는 CHAT_ID 환경변수가 설정되지 않았습니다.")
+        return
+
+    res = requests.post(f"https://api.telegram.org/bot{token}/sendMessage", 
+                         json={"chat_id": chat_id, "text": text})
+    
+    if res.status_code == 200:
+        print("✅ 텔레그램 메시지 전송 성공!")
+    else:
+        print(f"❌ 텔레그램 전송 실패: {res.status_code}")
+        print(res.text)
 
 if __name__ == "__main__":
     send_msg(get_report())
