@@ -4,23 +4,28 @@ import datetime
 import os
 import time
 
-# 한글 제목 매핑 (URL 슬러그 기준)
+# 한글 제목 매핑 DB
 KOR_MAP = {
     "his-hers": "히스 앤 허스",
     "the-pitt": "더 피트",
     "tron-ares": "트론: 아레스",
-    "it-welcome-to-derry": "그것: 웰컴 투 데리",
     "the-ugly": "얼굴",
-    "your-letter": "연의 편지"
+    "your-letter": "연의 편지",
+    "the-great-flood": "대홍수"
 }
 
-def fetch_data(platform, loc="world", category="full", limit=10):
-    # HBO MAX 경로 보정
+def fetch_safe_ranking(platform, loc="world", category="full", limit=10):
+    # 플랫폼별 실제 경로 보정
     p_id = "hbo" if platform == "hbo-max" else platform
-    cat_path = f"{category}/" if category != "full" else ""
-    url = f"https://flixpatrol.com/top10/{p_id}/{loc}/today/{cat_path}"
     
+    # 카테고리별 URL 구성 최적화
+    cat_path = ""
+    if category == "movies": cat_path = "movies/"
+    elif category == "tv": cat_path = "tv-shows/" if platform == "netflix" else "tv/" # 플랫폼별 상이
+    
+    url = f"https://flixpatrol.com/top10/{p_id}/{loc}/today/{cat_path}"
     headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
+    
     try:
         res = requests.get(url, headers=headers, timeout=20)
         soup = BeautifulSoup(res.text, 'html.parser')
@@ -33,11 +38,12 @@ def fetch_data(platform, loc="world", category="full", limit=10):
             
             rank = tds[0].get_text(strip=True).replace(".", "")
             
-            # 제목 추출 (숫자 오류 방지)
+            # 제목 추출 (링크 title 또는 URL 슬러그 활용)
             title_link = row.find('a', href=True)
             if title_link:
                 slug = title_link['href'].split('/')[-2]
                 raw_title = title_link.get('title') or slug.replace('-', ' ').title()
+                # 숫자로 깨질 경우 슬러그에서 복원
                 if raw_title.replace(".", "").isdigit():
                     raw_title = slug.replace('-', ' ').title()
                 title = KOR_MAP.get(slug, raw_title)
@@ -54,59 +60,56 @@ def fetch_data(platform, loc="world", category="full", limit=10):
         return data
     except: return []
 
-def format_report(cfg):
-    msg = f"🎬 **{cfg['name']}**\n"
-    # 영화/TV 구분 출력
+def format_platform_msg(p_cfg):
+    msg = f"🎬 **{p_cfg['name']}**\n"
+    # 글로벌: 영화 / TV 쇼 분리
     for cat, label in [("movies", "영화"), ("tv", "TV 쇼")]:
-        items = fetch_data(cfg['id'], "world", cat, 10)
+        items = fetch_safe_ranking(p_cfg['id'], "world", cat, 10 if p_cfg.get('korea') else 5)
         if items:
-            msg += f" 🌎 글로벌 TOP 10 ({label})\n"
+            msg += f" 🌎 글로벌 TOP ({label})\n"
             for i in items:
                 msg += f" {i['rank']} **{i['title']}** | {i['change']}\n"
             msg += "\n"
     
-    # 한국 랭킹 (통합)
-    if cfg.get('korea'):
-        k_items = fetch_data(cfg['id'], "south-korea", "full", 10)
+    # 한국: 통합 랭킹
+    if p_cfg.get('korea'):
+        k_items = fetch_safe_ranking(p_cfg['id'], "south-korea", "full", 10)
         if k_items:
             msg += " 🇰🇷 한국 TOP 10\n"
             for i in k_items:
                 msg += f" {i['rank']} **{i['title']}** | {i['change']}\n"
-    return msg + "\n"
+    return msg
 
-def send_msg(text):
-    token = os.environ.get("TELEGRAM_TOKEN")
-    chat_id = os.environ.get("CHAT_ID")
+def send_to_telegram(text):
+    token, chat_id = os.environ.get("TELEGRAM_TOKEN"), os.environ.get("CHAT_ID")
     if token and chat_id:
-        requests.post(f"https://api.telegram.org/bot{token}/sendMessage", 
-                      json={"chat_id": chat_id, "text": text, "parse_mode": "Markdown"})
+        url = f"https://api.telegram.org/bot{token}/sendMessage"
+        requests.post(url, json={"chat_id": chat_id, "text": text, "parse_mode": "Markdown"})
 
 def main():
-    # 한국 시간(KST) 설정 (UTC+9)
-    kst_now = datetime.datetime.utcnow() + datetime.timedelta(hours=9)
-    time_str = kst_now.strftime("%y.%m.%d %H:%M")
+    # 한국 시간(KST) 기준 시간 문자열 생성
+    kst = datetime.datetime.utcnow() + datetime.timedelta(hours=9)
+    time_tag = kst.strftime("%y.%m.%d %H:%M")
     
-    # 1. 넷플릭스 리포트
-    m1 = f"🏆 **[1/3] NETFLIX 실시간 랭킹 ({time_str})**\n━━━━━━━━━━━━━━━━━━\n\n"
-    m1 += format_report({"id": "netflix", "name": "NETFLIX", "korea": True})
-    send_msg(m1)
-    
+    # 1. NETFLIX
+    m1 = f"🏆 **[1/3] NETFLIX 실시간 랭킹 ({time_tag})**\n━━━━━━━━━━━━━━━━━━\n\n"
+    m1 += format_platform_msg({"id": "netflix", "name": "NETFLIX", "korea": True})
+    send_to_telegram(m1)
     time.sleep(2)
     
-    # 2. 디즈니+ 리포트
-    m2 = f"🏆 **[2/3] DISNEY+ 실시간 랭킹 ({time_str})**\n━━━━━━━━━━━━━━━━━━\n\n"
-    m2 += format_report({"id": "disney", "name": "DISNEY+", "korea": True})
-    send_msg(m2)
-    
+    # 2. DISNEY+
+    m2 = f"🏆 **[2/3] DISNEY+ 실시간 랭킹 ({time_tag})**\n━━━━━━━━━━━━━━━━━━\n\n"
+    m2 += format_platform_msg({"id": "disney", "name": "DISNEY+", "korea": True})
+    send_to_telegram(m2)
     time.sleep(2)
     
-    # 3. 기타 플랫폼 리포트 (HBO MAX 포함)
-    m3 = f"🏆 **[3/3] 기타 OTT 통합 랭킹 ({time_str})**\n━━━━━━━━━━━━━━━━━━\n\n"
-    for p in [{"id": "apple-tv", "name": "APPLE TV+", "lim": 5},
-              {"id": "amazon-prime", "name": "AMAZON PRIME", "lim": 5},
-              {"id": "hbo-max", "name": "HBO MAX", "lim": 5}]:
-        m3 += format_report(p)
-    send_msg(m3)
+    # 3. 기타 플랫폼 (HBO MAX 데이터 복구 포함)
+    m3 = f"🏆 **[3/3] 기타 OTT 통합 랭킹 ({time_tag})**\n━━━━━━━━━━━━━━━━━━\n\n"
+    for p in [{"id": "apple-tv", "name": "APPLE TV+"}, 
+              {"id": "amazon-prime", "name": "AMAZON PRIME"}, 
+              {"id": "hbo-max", "name": "HBO MAX"}]:
+        m3 += format_platform_msg(p)
+    send_to_telegram(m3)
 
 if __name__ == "__main__":
     main()
