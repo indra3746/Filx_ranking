@@ -11,6 +11,7 @@ OFFICIAL_KOR_TITLES = {
     "His & Hers": "히스 앤 허스",
     "Run Away": "런 어웨이",
     "Outer Banks": "아웃터 뱅크스",
+    "Black Mirror": "검은 거울",
     "TRON: Ares": "트론: 아레스",
     "Avatar: The Way of Water": "아바타: 물의 길",
     "Elemental": "엘리멘탈",
@@ -46,13 +47,19 @@ def fetch_flix_ranking(platform, location="world", limit=10):
         return []
 
 def send_telegram_msg(text):
-    # GitHub Secrets에 저장된 토큰과 ID 사용
+    # 중요: 이미지 로그에서 확인된 'CHAT_ID'와 'TELEGRAM_TOKEN'으로 수정했습니다.
     token = os.environ.get("TELEGRAM_TOKEN")
-    chat_id = os.environ.get("TELEGRAM_CHAT_ID")
+    chat_id = os.environ.get("CHAT_ID") 
+    
     if token and chat_id:
         url = f"https://api.telegram.org/bot{token}/sendMessage"
         payload = {"chat_id": chat_id, "text": text, "parse_mode": "Markdown"}
-        requests.post(url, json=payload)
+        response = requests.post(url, json=payload)
+        # 전송 실패 시 로그 확인용 (GitHub Actions 로그에서 확인 가능)
+        if response.status_code != 200:
+            print(f"Error: {response.text}")
+    else:
+        print("Error: TELEGRAM_TOKEN or CHAT_ID is missing in env.")
 
 def run_report():
     now = datetime.datetime.now().strftime("%Y.%m.%d %H:%M")
