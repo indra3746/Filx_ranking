@@ -1,13 +1,17 @@
-name: 5-Minute Stock Report
+name: Run OTT Ranking Bot
 
 on:
   schedule:
-    - cron: '*/5 * * * *' # 5분마다 자동 실행
-  workflow_dispatch: # 이 줄이 있어야 'Run workflow' 수동 버튼이 생깁니다
+    # 한국 시간 매일 오전 8시 = UTC 23시
+    - cron: '0 23 * * *'
+  
+  # GitHub 페이지에서 'Run workflow' 버튼으로 수동 실행 가능
+  workflow_dispatch:
 
 jobs:
-  run-bot:
+  build:
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v3
@@ -15,15 +19,16 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
-          python-version: '3.12'
+          python-version: '3.9'
 
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install requests pytz yfinance finance-datareader pandas  # finance-datareader와 pandas 추가
+          pip install requests beautifulsoup4
 
-      - name: Execute script
+      - name: Run script
         env:
+          # Settings > Secrets and variables > Actions에 등록된 변수 사용
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           CHAT_ID: ${{ secrets.CHAT_ID }}
         run: python main.py
