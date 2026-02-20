@@ -31,9 +31,8 @@ def send_telegram(text):
         except Exception as e:
             print(f"전송 실패: {e}")
 
-# 3. 데이터 수집 함수
+# 3. 데이터 수집 함수 (스왑 오류 수정 완료!)
 def fetch_rankings(platform, loc="world"):
-    # HBO MAX는 hbo, max, hbo-max 3가지 경로 시도
     if platform == "hbo-max":
         p_ids = ["hbo", "max", "hbo-max"]
     else:
@@ -56,13 +55,61 @@ def fetch_rankings(platform, loc="world"):
                 continue
             
             soup = BeautifulSoup(res.text, 'html.parser')
-            all_rows = soup.find_all('tr')
             
             movies = []
             tv = []
+            
+            # [수정된 부분] 순서에 의존하지 않고, 표 위쪽의 '제목'을 읽어서 영화/TV를 분류합니다.
+            for header in soup.find_all(['h1', 'h2', 'h3', 'h4']):
+                header_text = header.get_text(strip=True).lower()
+                
+                is_movie = 'movie' in header_text
+                is_tv = 'tv' in header_text
+                
+                if not (is_movie or is_tv):
+                    continue
+                    
+                table = header.find_next('table')
+                if not table:
+                    continue
+                    
+                current_list = []
+                for row in table.find_all('tr'):
+                    cols = row.find_all('td')
+                    if len(cols) >= 2:
+                        rank_txt = cols[0].get_text(strip=True).replace(".", "")
+                        if rank_txt.isdigit():
+                            rank = int(rank_txt)
+                            
+                            link = row.find('a')
+                            title_txt = "-"
+                            if link:
+                                # (기존에 가끔씩 에러를 내던 URL 파싱만 안전하게 보강)
+                                href_parts = [p for p in link.get('href', '').split('/') if p]
+                                slug = href_parts[-1] if href_parts else ""
+                                raw = link.get_text(strip=True) or link.get('title') or slug.replace('-', ' ').title()
+                                title_txt = KOR_MAP.get(slug, raw)
+                            else:
+                                title_txt = cols[1].get_text(strip=True)
+
+                            current_list.append(f"{rank}위 {title_txt}")
+                            
+                            # 혹시 표가 길어지더라도 TOP 10까지만 저장
+                            if len(current_list) == 10:
+                                break
+                                
+                if is_movie and not movies:
+                    movies = current_list
+                elif is_tv and not tv:
+                    tv = current_list
+                    
+            if movies or tv:
+                return {"movies": movies, "tv": tv}
+                
+            # [안전장치] 만약 위 방식으로 데이터를 못 찾았다면, 기존 방식(순서대로 1, 2번째 표 긁기)으로 작동
+            all_rows = soup.find_all('tr')
             current_list = []
             list_count = 0 
-            
             for row in all_rows:
                 cols = row.find_all('td')
                 if len(cols) >= 2:
@@ -70,24 +117,25 @@ def fetch_rankings(platform, loc="world"):
                     if rank_txt.isdigit():
                         rank = int(rank_txt)
                         
-                        # 1위가 다시 나오면 리스트 분리
                         if rank == 1 and current_list:
                             if list_count == 0: movies = current_list[:]
                             elif list_count == 1: tv = current_list[:]
                             current_list = []
                             list_count += 1
                         
-                        # 제목 추출
                         link = row.find('a')
                         title_txt = "-"
                         if link:
-                            slug = link.get('href', '').split('/')[-2]
+                            # 기존 코드 유지
+                            try:
+                                slug = link.get('href', '').split('/')[-2]
+                            except:
+                                slug = ""
                             raw = link.get_text(strip=True) or link.get('title') or slug.replace('-', ' ').title()
                             title_txt = KOR_MAP.get(slug, raw)
                         else:
                             title_txt = cols[1].get_text(strip=True)
 
-                        # 순위와 제목만 저장
                         current_list.append(f"{rank}위 {title_txt}")
 
             if current_list:
