@@ -206,4 +206,28 @@ def main():
     m2 = f"🏆 **[2/3] DISNEY+ 실시간 랭킹 ({time_str})**\n━━━━━━━━━━━━━━━━━━\n\n"
     m2 += format_msg("DISNEY+", d_world, limit=10)
     m2 += format_korea_ranking(d_kr) 
-    m2 += "🔗 [상세보기](https://flixpatrol.com/top10/disney/)\n"
+    m2 += "🔗 [상세보기](https://flixpatrol.com/top10/disney/)\n" 
+    
+    send_telegram(m2)
+    time.sleep(3)
+    
+    # [3] 기타 (HBO MAX, AMAZON, APPLE)
+    m3 = f"🏆 **[3/3] 기타 OTT 통합 랭킹 ({time_str})**\n━━━━━━━━━━━━━━━━━━\n\n"
+    
+    hbo = fetch_rankings("hbo-max", "world")
+    if hbo['movies'] or hbo['tv']: 
+        m3 += format_msg("HBO MAX", hbo, limit=5)
+    
+    amz = fetch_rankings("amazon-prime", "world")
+    if amz['movies'] or amz['tv']: 
+        m3 += format_msg("AMAZON PRIME", amz, limit=5)
+        
+    app = fetch_rankings("apple-tv", "world")
+    if app['movies'] or app['tv']:
+        m3 += format_msg("APPLE TV+", app, limit=5)
+    
+    send_telegram(m3)
+    print("--- 완료 ---")
+
+if __name__ == "__main__":
+    main()
