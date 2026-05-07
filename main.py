@@ -206,4 +206,4 @@ def main():
     m2 = f"🏆 **[2/3] DISNEY+ 실시간 랭킹 ({time_str})**\n━━━━━━━━━━━━━━━━━━\n\n"
     m2 += format_msg("DISNEY+", d_world, limit=10)
     m2 += format_korea_ranking(d_kr) 
-    m2 += "🔗 [상세보기](
+    m2 += "🔗 [상세보기](https://flixpatrol.com/top10/disney/)\n"
