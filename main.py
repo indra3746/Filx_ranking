@@ -1,4 +1,4 @@
-import requests
+import cloudscraper # 🚨 requests 대신 이걸 씁니다!
 from bs4 import BeautifulSoup
 import datetime
 import os
@@ -27,29 +27,29 @@ def send_telegram(text):
     if token and chat_id and len(text) > 10:
         try:
             url = f"https://api.telegram.org/bot{token}/sendMessage"
-            requests.post(url, json={"chat_id": chat_id, "text": text, "parse_mode": "Markdown", "disable_web_page_preview": True})
+            # 텔레그램 API 전송은 기존 방패(Cloudflare)랑 상관없으므로 특수 툴(scraper)을 쓰되 기본 로직 유지
+            scraper = cloudscraper.create_scraper()
+            scraper.post(url, json={"chat_id": chat_id, "text": text, "parse_mode": "Markdown", "disable_web_page_preview": True})
         except Exception as e:
             print(f"전송 실패: {e}")
 
-# 3. 데이터 수집 함수 (스왑 오류 수정 완료!)
+# 3. 데이터 수집 함수
 def fetch_rankings(platform, loc="world"):
     if platform == "hbo-max":
         p_ids = ["hbo", "max", "hbo-max"]
     else:
         p_ids = [platform]
         
-    headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-        'Referer': 'https://flixpatrol.com/'
-    }
-
+    # 🚨 Cloudflare 우회 전용 스크래퍼 생성!
+    scraper = cloudscraper.create_scraper()
+    
     for pid in p_ids:
         url = f"https://flixpatrol.com/top10/{pid}/{loc}/"
         print(f"[{platform}] 접속 시도: {url}")
         
         try:
-            res = requests.get(url, headers=headers, timeout=20)
+            # 🚨 requests.get 대신 scraper.get 사용!
+            res = scraper.get(url, timeout=20)
             if res.status_code != 200:
                 print(f"⚠️ {pid} 경로 응답 없음 ({res.status_code})")
                 continue
@@ -59,7 +59,6 @@ def fetch_rankings(platform, loc="world"):
             movies = []
             tv = []
             
-            # [수정된 부분] 순서에 의존하지 않고, 표 위쪽의 '제목'을 읽어서 영화/TV를 분류합니다.
             for header in soup.find_all(['h1', 'h2', 'h3', 'h4']):
                 header_text = header.get_text(strip=True).lower()
                 
@@ -84,7 +83,6 @@ def fetch_rankings(platform, loc="world"):
                             link = row.find('a')
                             title_txt = "-"
                             if link:
-                                # (기존에 가끔씩 에러를 내던 URL 파싱만 안전하게 보강)
                                 href_parts = [p for p in link.get('href', '').split('/') if p]
                                 slug = href_parts[-1] if href_parts else ""
                                 raw = link.get_text(strip=True) or link.get('title') or slug.replace('-', ' ').title()
@@ -92,12 +90,11 @@ def fetch_rankings(platform, loc="world"):
                             else:
                                 title_txt = cols[1].get_text(strip=True)
 
-                            current_list.append(f"{rank}위 {title_txt}")
+                        current_list.append(f"{rank}위 {title_txt}")
+                        
+                        if len(current_list) == 10:
+                            break
                             
-                            # 혹시 표가 길어지더라도 TOP 10까지만 저장
-                            if len(current_list) == 10:
-                                break
-                                
                 if is_movie and not movies:
                     movies = current_list
                 elif is_tv and not tv:
@@ -106,7 +103,7 @@ def fetch_rankings(platform, loc="world"):
             if movies or tv:
                 return {"movies": movies, "tv": tv}
                 
-            # [안전장치] 만약 위 방식으로 데이터를 못 찾았다면, 기존 방식(순서대로 1, 2번째 표 긁기)으로 작동
+            # [안전장치]
             all_rows = soup.find_all('tr')
             current_list = []
             list_count = 0 
@@ -126,7 +123,6 @@ def fetch_rankings(platform, loc="world"):
                         link = row.find('a')
                         title_txt = "-"
                         if link:
-                            # 기존 코드 유지
                             try:
                                 slug = link.get('href', '').split('/')[-2]
                             except:
@@ -150,7 +146,7 @@ def fetch_rankings(platform, loc="world"):
             
     return {"movies": [], "tv": []}
 
-# 4. 메시지 포맷팅 (옵션 추가)
+# 4. 메시지 포맷팅
 def format_msg(name, data, limit=10):
     msg = f"🎬 **{name}**\n"
     has_data = False
@@ -169,7 +165,7 @@ def format_msg(name, data, limit=10):
         msg += " (데이터 없음)\n\n"
     return msg
 
-# 5. 한국 랭킹 포맷팅 함수 (이모지 및 줄바꿈 적용)
+# 5. 한국 랭킹 포맷팅 함수
 def format_korea_ranking(data):
     msg = ""
     if data['movies'] or data['tv']:
@@ -177,11 +173,11 @@ def format_korea_ranking(data):
         
         if data['movies']:
             msg += " 🎞️ **영화**\n"
-            msg += "\n".join([f" {x}" for x in data['movies'][:10]]) + "\n\n" # 한 줄 띄움 적용
+            msg += "\n".join([f" {x}" for x in data['movies'][:10]]) + "\n\n" 
             
         if data['tv']:
             msg += " 📺 **TV 쇼**\n"
-            msg += "\n".join([f" {x}" for x in data['tv'][:10]]) + "\n\n" # 한 줄 띄움 적용
+            msg += "\n".join([f" {x}" for x in data['tv'][:10]]) + "\n\n" 
     return msg
 
 # 6. 메인 로직
@@ -198,40 +194,16 @@ def main():
     m1 = f"🏆 **[1/3] NETFLIX 실시간 랭킹 ({time_str})**\n━━━━━━━━━━━━━━━━━━\n\n"
     m1 += format_msg("NETFLIX Global", n_world, limit=10)
     m1 += format_korea_ranking(n_kr)
-    m1 += "🔗 [상세보기](https://flixpatrol.com/top10/netflix/)\n" # 링크 추가
+    m1 += "🔗 [상세보기](https://flixpatrol.com/top10/netflix/)\n"
     
     send_telegram(m1)
     time.sleep(3)
     
     # [2] DISNEY+
     d_world = fetch_rankings("disney", "world")
-    d_kr = fetch_rankings("disney", "south-korea") # 한국 랭킹 추가 호출
+    d_kr = fetch_rankings("disney", "south-korea") 
     
     m2 = f"🏆 **[2/3] DISNEY+ 실시간 랭킹 ({time_str})**\n━━━━━━━━━━━━━━━━━━\n\n"
     m2 += format_msg("DISNEY+", d_world, limit=10)
-    m2 += format_korea_ranking(d_kr) # 한국 랭킹 추가
-    m2 += "🔗 [상세보기](https://flixpatrol.com/top10/disney/)\n" # 링크 추가
-    
-    send_telegram(m2)
-    time.sleep(3)
-    
-    # [3] 기타 (HBO MAX, AMAZON, APPLE)
-    m3 = f"🏆 **[3/3] 기타 OTT 통합 랭킹 ({time_str})**\n━━━━━━━━━━━━━━━━━━\n\n"
-    
-    hbo = fetch_rankings("hbo-max", "world")
-    if hbo['movies'] or hbo['tv']: 
-        m3 += format_msg("HBO MAX", hbo, limit=5)
-    
-    amz = fetch_rankings("amazon-prime", "world")
-    if amz['movies'] or amz['tv']: 
-        m3 += format_msg("AMAZON PRIME", amz, limit=5)
-        
-    app = fetch_rankings("apple-tv", "world")
-    if app['movies'] or app['tv']:
-        m3 += format_msg("APPLE TV+", app, limit=5)
-    
-    send_telegram(m3)
-    print("--- 완료 ---")
-
-if __name__ == "__main__":
-    main()
+    m2 += format_korea_ranking(d_kr) 
+    m2 += "🔗 [상세보기](
