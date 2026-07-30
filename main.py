@@ -1,27 +1,10 @@
 import os
 import time
 import datetime
-import requests # 텔레그램 전송용
+import requests
 from bs4 import BeautifulSoup
-from curl_cffi import requests as curl_requests # 🚨 클라우드플레어 우회 전용!
 
-# 1. 한글 제목 매핑 DB
-KOR_MAP = {
-    "his-hers": "히스 앤 허스",
-    "people-we-meet-on-vacation": "우리의 열 번째 여름",
-    "the-ugly": "얼굴",
-    "your-letter": "연의 편지",
-    "the-great-flood": "대홍수",
-    "tron-ares": "트론: 아레스",
-    "made-in-korea": "메이드 인 코리아",
-    "culinary-class-wars": "흑백요리사",
-    "squid-game": "오징어 게임",
-    "the-pitt": "더 피트",
-    "stranger-things": "기묘한 이야기",
-    "emily-in-paris": "에밀리, 파리에 가다"
-}
-
-# 2. 텔레그램 전송 함수
+# 1. 텔레그램 전송 함수
 def send_telegram(text):
     token = os.environ.get("TELEGRAM_TOKEN")
     chat_id = os.environ.get("CHAT_ID")
@@ -32,24 +15,21 @@ def send_telegram(text):
         except Exception as e:
             print(f"전송 실패: {e}")
 
-# 3. 데이터 수집 함수 (curl_cffi 활용 초고속 우회)
+# 2. 데이터 수집 함수 (ScraperAPI 무적 우회)
 def fetch_rankings(platform, loc="world"):
+    scraper_api_key = os.environ.get("SCRAPER_API_KEY")
     if platform == "hbo-max":
         p_ids = ["hbo", "max", "hbo-max"]
     else:
         p_ids = [platform]
         
     for pid in p_ids:
-        url = f"https://flixpatrol.com/top10/{pid}/{loc}/"
-        print(f"[{platform}] 접속 시도: {url}")
+        target_url = f"https://flixpatrol.com/top10/{pid}/{loc}/"
+        print(f"[{platform}] ScraperAPI 접속 시도: {target_url}")
         
         try:
-            # 💡 사람 브라우저처럼 보이기 위한 헤더 추가
-            headers = {
-                "Accept-Language": "ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7",
-            }
-            # 🚨 chrome110 대신 최신 버전인 chrome124로 위장!
-            res = curl_requests.get(url, impersonate="chrome124", headers=headers, timeout=15)
+            payload = {'api_key': scraper_api_key, 'url': target_url}
+            res = requests.get('http://api.scraperapi.com', params=payload, timeout=60)
             
             if res.status_code != 200:
                 print(f"⚠️ {pid} 응답 에러 (코드: {res.status_code})")
@@ -59,7 +39,7 @@ def fetch_rankings(platform, loc="world"):
             movies = []
             tv = []
 
-            # 2. FlixPatrol 실시간 표(Table) 직관적 파싱
+            # FlixPatrol 실시간 표(Table) 파싱
             tables = soup.find_all('table')
             
             for idx, tbl in enumerate(tables):
@@ -81,7 +61,6 @@ def fetch_rankings(platform, loc="world"):
                             if len(parsed_list) == 10:
                                 break
                 
-                # 첫 번째 표(idx=0)는 영화, 두 번째 표(idx=1)는 TV쇼로 담기
                 if parsed_list:
                     if idx == 0 and not movies:
                         movies = parsed_list
@@ -96,7 +75,7 @@ def fetch_rankings(platform, loc="world"):
             
     return {"movies": [], "tv": []}
 
-# 4. 메시지 포맷팅
+# 3. 메시지 포맷팅
 def format_msg(name, data, limit=10):
     msg = f"🎬 **{name}**\n"
     has_data = False
@@ -115,7 +94,7 @@ def format_msg(name, data, limit=10):
         msg += " (데이터 없음)\n\n"
     return msg
 
-# 5. 한국 랭킹 포맷팅 함수
+# 4. 한국 랭킹 포맷팅 함수
 def format_korea_ranking(data):
     msg = ""
     if data['movies'] or data['tv']:
@@ -130,7 +109,7 @@ def format_korea_ranking(data):
             msg += "\n".join([f" {x}" for x in data['tv'][:10]]) + "\n\n" 
     return msg
 
-# 6. 메인 로직
+# 5. 메인 로직
 def main():
     now = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(hours=9)
     time_str = now.strftime("%y.%m.%d %H:%M")
@@ -174,7 +153,8 @@ def main():
         
     app = fetch_rankings("apple-tv", "world")
     if app['movies'] or app['tv']:
-        m3 += format_msg("APPLE TV+", app, limit=5)
+        msg_app = format_msg("APPLE TV+", app, limit=5)
+        m3 += msg_app
     
     send_telegram(m3)
     
