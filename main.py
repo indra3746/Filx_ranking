@@ -46,15 +46,11 @@ def fetch_rankings(browser, platform, loc="world"):
 
     for pid in p_ids:
         url = f"https://flixpatrol.com/top10/{pid}/{loc}/"
-        print(f"[{platform}] 접속 시도: {url}")
+        print(f"[{platform}] Playwright 접속 시도: {url}")
         
         try:
             response = page.goto(url, wait_until="domcontentloaded", timeout=30000)
             page.wait_for_timeout(3000) # 보안 차단막 해제 대기
-            
-            if response and response.status != 200:
-                print(f"⚠️ {pid} 경로 응답 없음 ({response.status})")
-                continue
             
             html_content = page.content()
             soup = BeautifulSoup(html_content, 'html.parser')
