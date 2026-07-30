@@ -1,4 +1,4 @@
-import cloudscraper # 🚨 requests 대신 이걸 씁니다!
+import cloudscraper # 🚨 requests 대신 우회 전용 scraper 사용
 from bs4 import BeautifulSoup
 import datetime
 import os
@@ -20,35 +20,40 @@ KOR_MAP = {
     "emily-in-paris": "에밀리, 파리에 가다"
 }
 
-# 2. 텔레그램 전송
+# 2. 텔레그램 전송 함수
 def send_telegram(text):
     token = os.environ.get("TELEGRAM_TOKEN")
     chat_id = os.environ.get("CHAT_ID")
     if token and chat_id and len(text) > 10:
         try:
             url = f"https://api.telegram.org/bot{token}/sendMessage"
-            # 텔레그램 API 전송은 기존 방패(Cloudflare)랑 상관없으므로 특수 툴(scraper)을 쓰되 기본 로직 유지
             scraper = cloudscraper.create_scraper()
             scraper.post(url, json={"chat_id": chat_id, "text": text, "parse_mode": "Markdown", "disable_web_page_preview": True})
         except Exception as e:
             print(f"전송 실패: {e}")
 
-# 3. 데이터 수집 함수
+# 3. 데이터 수집 함수 (우회 옵션 강화 적용!)
 def fetch_rankings(platform, loc="world"):
     if platform == "hbo-max":
         p_ids = ["hbo", "max", "hbo-max"]
     else:
         p_ids = [platform]
         
-    # 🚨 Cloudflare 우회 전용 스크래퍼 생성!
-    scraper = cloudscraper.create_scraper()
+    # 🚨 Cloudflare 보안 통과율을 높이기 위한 브라우저 위장 옵션 세팅
+    scraper = cloudscraper.create_scraper(
+        browser={
+            'browser': 'chrome',
+            'platform': 'windows',
+            'desktop': True
+        },
+        delay=10
+    )
     
     for pid in p_ids:
         url = f"https://flixpatrol.com/top10/{pid}/{loc}/"
         print(f"[{platform}] 접속 시도: {url}")
         
         try:
-            # 🚨 requests.get 대신 scraper.get 사용!
             res = scraper.get(url, timeout=20)
             if res.status_code != 200:
                 print(f"⚠️ {pid} 경로 응답 없음 ({res.status_code})")
@@ -90,7 +95,7 @@ def fetch_rankings(platform, loc="world"):
                             else:
                                 title_txt = cols[1].get_text(strip=True)
 
-                        current_list.append(f"{rank}위 {title_txt}")
+                            current_list.append(f"{rank}위 {title_txt}")
                         
                         if len(current_list) == 10:
                             break
