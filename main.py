@@ -32,7 +32,7 @@ def send_telegram(text):
         except Exception as e:
             print(f"전송 실패: {e}")
 
-# 3. 데이터 수집 함수 (Playwright 가상 브라우저 활용)
+# 3. 데이터 수집 함수 (Playwright 보안 우회 강화)
 def fetch_rankings(browser, platform, loc="world"):
     if platform == "hbo-max":
         p_ids = ["hbo", "max", "hbo-max"]
@@ -40,8 +40,13 @@ def fetch_rankings(browser, platform, loc="world"):
         p_ids = [platform]
         
     context = browser.new_context(
-        user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36"
+        user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
+        viewport={'width': 1920, 'height': 1080},
+        locale="en-US"
     )
+    
+    # webdriver 속성 숨기기 (봇 감지 회피)
+    context.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
     page = context.new_page()
 
     for pid in p_ids:
@@ -49,8 +54,17 @@ def fetch_rankings(browser, platform, loc="world"):
         print(f"[{platform}] Playwright 접속 시도: {url}")
         
         try:
-            response = page.goto(url, wait_until="domcontentloaded", timeout=30000)
-            page.wait_for_timeout(3000) # 보안 차단막 해제 대기
+            page.goto(url, wait_until="domcontentloaded", timeout=40000)
+            
+            # Cloudflare 인증 완화를 위해 5초간 대기하며 무작위 마우스 이동 흉내
+            page.wait_for_timeout(5000)
+            page.mouse.move(100, 200)
+            
+            # 표(table) 요소가 나타날 때까지 최대 10초 대기
+            try:
+                page.wait_for_selector("table", timeout=10000)
+            except:
+                pass
             
             html_content = page.content()
             soup = BeautifulSoup(html_content, 'html.parser')
@@ -58,6 +72,7 @@ def fetch_rankings(browser, platform, loc="world"):
             movies = []
             tv = []
             
+            # 1) 헤더(h1~h4) + 테이블 파싱 방식
             for header in soup.find_all(['h1', 'h2', 'h3', 'h4']):
                 header_text = header.get_text(strip=True).lower()
                 
@@ -99,6 +114,42 @@ def fetch_rankings(browser, platform, loc="world"):
                 elif is_tv and not tv:
                     tv = current_list
                     
+            if movies or tv:
+                context.close()
+                return {"movies": movies, "tv": tv}
+
+            # 2) [백업] 전체 tr 태그 직접 파싱
+            all_rows = soup.find_all('tr')
+            current_list = []
+            list_count = 0
+            for row in all_rows:
+                cols = row.find_all('td')
+                if len(cols) >= 2:
+                    rank_txt = cols[0].get_text(strip=True).replace(".", "")
+                    if rank_txt.isdigit():
+                        rank = int(rank_txt)
+                        if rank == 1 and current_list:
+                            if list_count == 0: movies = current_list[:]
+                            elif list_count == 1: tv = current_list[:]
+                            current_list = []
+                            list_count += 1
+                        
+                        link = row.find('a')
+                        title_txt = "-"
+                        if link:
+                            href_parts = [p for p in link.get('href', '').split('/') if p]
+                            slug = href_parts[-1] if href_parts else ""
+                            raw = link.get_text(strip=True) or link.get('title') or slug.replace('-', ' ').title()
+                            title_txt = KOR_MAP.get(slug, raw)
+                        else:
+                            title_txt = cols[1].get_text(strip=True)
+
+                        current_list.append(f"{rank}위 {title_txt}")
+
+            if current_list:
+                if list_count == 0: movies = current_list
+                elif list_count == 1: tv = current_list
+
             if movies or tv:
                 context.close()
                 return {"movies": movies, "tv": tv}
@@ -152,7 +203,10 @@ def main():
     
     with sync_playwright() as p:
         # 가상 크롬 브라우저 실행
-        browser = p.chromium.launch(headless=True)
+        browser = p.chromium.launch(
+            headless=True,
+            args=['--no-sandbox', '--disable-setuid-sandbox', '--disable-blink-features=AutomationControlled']
+        )
         
         # [1] NETFLIX
         n_world = fetch_rankings(browser, "netflix", "world")
