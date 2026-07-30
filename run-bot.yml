@@ -2,10 +2,8 @@ name: OTT Ranking Bot
 
 on:
   schedule:
-    # 한국 시간 기준 매일 오전 9:00 (UTC 00:00)
     - cron: '0 0 * * *'
-  workflow_dispatch: # 수동 실행 버튼 활성화
-name: OTT Ranking Bot
+  workflow_dispatch:
 
 jobs:
   build:
