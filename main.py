@@ -32,7 +32,7 @@ def send_telegram(text):
         except Exception as e:
             print(f"전송 실패: {e}")
 
-# 3. 데이터 수집 함수 (타임아웃 에러 원인이었던 networkidle 제거!)
+# 3. 데이터 수집 함수 (Cloudflare 우회 및 정확한 HTML 파싱 적용)
 def fetch_rankings(browser, platform, loc="world"):
     if platform == "hbo-max":
         p_ids = ["hbo", "max", "hbo-max"]
@@ -45,6 +45,7 @@ def fetch_rankings(browser, platform, loc="world"):
         locale="en-US"
     )
     
+    # Cloudflare 봇 감지 무력화 스크립트
     context.add_init_script("""
         Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
         window.chrome = { runtime: {} };
@@ -56,63 +57,57 @@ def fetch_rankings(browser, platform, loc="world"):
         print(f"[{platform}] Playwright 접속 시도: {url}")
         
         try:
-            # 🚨 networkidle 대신 domcontentloaded 로 변경하여 45초 갇힘 현상 해결!
-            page.goto(url, wait_until="domcontentloaded", timeout=20000)
-            page.wait_for_timeout(3000) # 보안 차단 해제 대기
+            # 1. 페이지 접속 및 Cloudflare 챌린지 통과 대기
+            page.goto(url, wait_until="domcontentloaded", timeout=30000)
+            
+            # Cloudflare 감지 해제를 위한 7초 대기 + 미세 마우스 조작
+            page.wait_for_timeout(7000)
+            page.mouse.move(200, 300)
             
             html_content = page.content()
             soup = BeautifulSoup(html_content, 'html.parser')
             
             movies = []
             tv = []
+
+            # 2. FlixPatrol 실시간 표(Table) 파싱 (정확한 클래스/셀렉터 접근)
+            tables = soup.find_all('table')
             
-            # [전략 1] 카드형/그리드형 또는 테이블 구조 탐색
-            sections = soup.find_all(['div', 'section', 'article', 'tr'])
-            temp_movies = []
-            temp_tv = []
-            
-            for sec in sections:
-                sec_text = sec.get_text(strip=True).lower()
-                links = sec.find_all('a')
-                valid_links = []
-                for a in links:
-                    href = a.get('href', '')
-                    if '/title/' in href or '/top10/' in href:
-                        txt = a.get_text(strip=True)
-                        if txt and txt not in valid_links and len(txt) > 1:
-                            valid_links.append(txt)
+            for tbl in tables:
+                # 표 바로 위에 있는 제목/카테고리 텍스트 확인
+                parent_sec = tbl.find_parent(['div', 'section'])
+                sec_text = parent_sec.get_text(strip=True).lower() if parent_sec else ""
                 
-                if valid_links:
-                    if 'movie' in sec_text and not temp_movies:
-                        temp_movies = valid_links[:10]
-                    elif ('tv' in sec_text or 'show' in sec_text) and not temp_tv:
-                        temp_tv = valid_links[:10]
-
-            # [전략 2] 기존 헤더/테이블 백업 파싱
-            if not temp_movies and not temp_tv:
-                for header in soup.find_all(['h1', 'h2', 'h3', 'h4', 'div']):
-                    h_text = header.get_text(strip=True).lower()
-                    if 'movie' in h_text or 'tv' in h_text:
-                        parent = header.parent
-                        row_links = parent.find_all('a') if parent else []
-                        parsed = []
-                        for l in row_links:
-                            t = l.get_text(strip=True)
-                            if t and t not in parsed and len(t) > 1:
-                                slug = l.get('href', '').split('/')[-2] if '/' in l.get('href', '') else ""
-                                title = KOR_MAP.get(slug, t)
-                                parsed.append(title)
-                                if len(parsed) == 10: break
-                        
-                        if 'movie' in h_text and not temp_movies:
-                            temp_movies = parsed
-                        elif 'tv' in h_text and not temp_tv:
-                            temp_tv = parsed
-
-            if temp_movies:
-                movies = [f"{idx+1}위 {title}" for idx, title in enumerate(temp_movies)]
-            if temp_tv:
-                tv = [f"{idx+1}위 {title}" for idx, title in enumerate(temp_tv)]
+                is_movie = 'movie' in sec_text
+                is_tv = 'tv' in sec_text or 'show' in sec_text
+                
+                parsed_list = []
+                for row in tbl.find_all('tr'):
+                    cols = row.find_all('td')
+                    if len(cols) >= 2:
+                        rank_txt = cols[0].get_text(strip=True).replace(".", "")
+                        if rank_txt.isdigit():
+                            rank = int(rank_txt)
+                            link = row.find('a')
+                            if link:
+                                href = link.get('href', '')
+                                slug = href.split('/')[-2] if '/' in href else ""
+                                raw_title = link.get_text(strip=True) or link.get('title', '')
+                                title = KOR_MAP.get(slug, raw_title)
+                                if title:
+                                    parsed_list.append(f"{rank}위 {title}")
+                            if len(parsed_list) == 10:
+                                break
+                
+                if parsed_list:
+                    if is_movie and not movies:
+                        movies = parsed_list
+                    elif is_tv and not tv:
+                        tv = parsed_list
+                    elif not movies:
+                        movies = parsed_list
+                    elif not tv:
+                        tv = parsed_list
 
             if movies or tv:
                 context.close()
