@@ -39,7 +39,7 @@ def fetch_rankings(platform, loc="world"):
     else:
         p_ids = [platform]
         
-for pid in p_ids:
+    for pid in p_ids:
         url = f"https://flixpatrol.com/top10/{pid}/{loc}/"
         print(f"[{platform}] 접속 시도: {url}")
         
