@@ -32,7 +32,7 @@ def send_telegram(text):
         except Exception as e:
             print(f"전송 실패: {e}")
 
-# 3. 데이터 수집 함수 (Playwright 보안 우회 강화)
+# 3. 데이터 수집 함수 (FlixPatrol 최신 구조 대응 및 강화된 우회)
 def fetch_rankings(browser, platform, loc="world"):
     if platform == "hbo-max":
         p_ids = ["hbo", "max", "hbo-max"]
@@ -45,8 +45,11 @@ def fetch_rankings(browser, platform, loc="world"):
         locale="en-US"
     )
     
-    # webdriver 속성 숨기기 (봇 감지 회피)
-    context.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
+    # 봇 감지 메커니즘 무력화
+    context.add_init_script("""
+        Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
+        window.chrome = { runtime: {} };
+    """)
     page = context.new_page()
 
     for pid in p_ids:
@@ -54,17 +57,8 @@ def fetch_rankings(browser, platform, loc="world"):
         print(f"[{platform}] Playwright 접속 시도: {url}")
         
         try:
-            page.goto(url, wait_until="domcontentloaded", timeout=40000)
-            
-            # Cloudflare 인증 완화를 위해 5초간 대기하며 무작위 마우스 이동 흉내
-            page.wait_for_timeout(5000)
-            page.mouse.move(100, 200)
-            
-            # 표(table) 요소가 나타날 때까지 최대 10초 대기
-            try:
-                page.wait_for_selector("table", timeout=10000)
-            except:
-                pass
+            page.goto(url, wait_until="networkidle", timeout=45000)
+            page.wait_for_timeout(4000)
             
             html_content = page.content()
             soup = BeautifulSoup(html_content, 'html.parser')
@@ -72,83 +66,61 @@ def fetch_rankings(browser, platform, loc="world"):
             movies = []
             tv = []
             
-            # 1) 헤더(h1~h4) + 테이블 파싱 방식
-            for header in soup.find_all(['h1', 'h2', 'h3', 'h4']):
-                header_text = header.get_text(strip=True).lower()
+            # [전략 1] 카드형/그리드형 또는 테이블 구조 탐색
+            # 링크(a 태그) 중 /title/ 경로를 포함하는 순위 데이터 파싱
+            rank_items = soup.find_all(['tr', 'div', 'li'])
+            
+            temp_movies = []
+            temp_tv = []
+            current_category = None
+            
+            # 카테고리 헤더 탐색
+            sections = soup.find_all(['div', 'section', 'article'])
+            for sec in sections:
+                sec_text = sec.get_text(strip=True).lower()
                 
-                is_movie = 'movie' in header_text
-                is_tv = 'tv' in header_text
+                # 영화/TV 영역 구분
+                links = sec.find_all('a')
+                valid_links = []
+                for a in links:
+                    href = a.get('href', '')
+                    if '/title/' in href or '/top10/' in href:
+                        txt = a.get_text(strip=True)
+                        if txt and txt not in valid_links and len(txt) > 1:
+                            valid_links.append(txt)
                 
-                if not (is_movie or is_tv):
-                    continue
-                    
-                table = header.find_next('table')
-                if not table:
-                    continue
-                    
-                current_list = []
-                for row in table.find_all('tr'):
-                    cols = row.find_all('td')
-                    if len(cols) >= 2:
-                        rank_txt = cols[0].get_text(strip=True).replace(".", "")
-                        if rank_txt.isdigit():
-                            rank = int(rank_txt)
-                            
-                            link = row.find('a')
-                            title_txt = "-"
-                            if link:
-                                href_parts = [p for p in link.get('href', '').split('/') if p]
-                                slug = href_parts[-1] if href_parts else ""
-                                raw = link.get_text(strip=True) or link.get('title') or slug.replace('-', ' ').title()
-                                title_txt = KOR_MAP.get(slug, raw)
-                            else:
-                                title_txt = cols[1].get_text(strip=True)
+                if valid_links:
+                    if 'movie' in sec_text and not temp_movies:
+                        temp_movies = valid_links[:10]
+                    elif ('tv' in sec_text or 'show' in sec_text) and not temp_tv:
+                        temp_tv = valid_links[:10]
 
-                            current_list.append(f"{rank}위 {title_txt}")
+            # [전략 2] 기존 테이블 구조 백업 파싱
+            if not temp_movies and not temp_tv:
+                for header in soup.find_all(['h1', 'h2', 'h3', 'h4', 'div']):
+                    h_text = header.get_text(strip=True).lower()
+                    if 'movie' in h_text or 'tv' in h_text:
+                        parent = header.parent
+                        row_links = parent.find_all('a') if parent else []
+                        parsed = []
+                        for l in row_links:
+                            t = l.get_text(strip=True)
+                            if t and t not in parsed and len(t) > 1:
+                                slug = l.get('href', '').split('/')[-2] if '/' in l.get('href', '') else ""
+                                title = KOR_MAP.get(slug, t)
+                                parsed.append(title)
+                                if len(parsed) == 10: break
                         
-                        if len(current_list) == 10:
-                            break
-                            
-                if is_movie and not movies:
-                    movies = current_list
-                elif is_tv and not tv:
-                    tv = current_list
-                    
-            if movies or tv:
-                context.close()
-                return {"movies": movies, "tv": tv}
+                        if 'movie' in h_text and not temp_movies:
+                            temp_movies = parsed
+                        elif 'tv' in h_text and not temp_tv:
+                            temp_tv = parsed
 
-            # 2) [백업] 전체 tr 태그 직접 파싱
-            all_rows = soup.find_all('tr')
-            current_list = []
-            list_count = 0
-            for row in all_rows:
-                cols = row.find_all('td')
-                if len(cols) >= 2:
-                    rank_txt = cols[0].get_text(strip=True).replace(".", "")
-                    if rank_txt.isdigit():
-                        rank = int(rank_txt)
-                        if rank == 1 and current_list:
-                            if list_count == 0: movies = current_list[:]
-                            elif list_count == 1: tv = current_list[:]
-                            current_list = []
-                            list_count += 1
-                        
-                        link = row.find('a')
-                        title_txt = "-"
-                        if link:
-                            href_parts = [p for p in link.get('href', '').split('/') if p]
-                            slug = href_parts[-1] if href_parts else ""
-                            raw = link.get_text(strip=True) or link.get('title') or slug.replace('-', ' ').title()
-                            title_txt = KOR_MAP.get(slug, raw)
-                        else:
-                            title_txt = cols[1].get_text(strip=True)
-
-                        current_list.append(f"{rank}위 {title_txt}")
-
-            if current_list:
-                if list_count == 0: movies = current_list
-                elif list_count == 1: tv = current_list
+            # 번호 매기기 포맷 적용
+            if temp_movies:
+                movies = [f"{idx+1}위 {title}" for idx, title in enumerate(temp_movies)]
+            if temp_tv:
+                tv = [f"{idx+1}위 {title}" for idx, title in enumerate(temp_tv)]
 
             if movies or tv:
                 context.close()
@@ -202,10 +174,14 @@ def main():
     print(f"--- 실행 ({time_str}) ---")
     
     with sync_playwright() as p:
-        # 가상 크롬 브라우저 실행
         browser = p.chromium.launch(
             headless=True,
-            args=['--no-sandbox', '--disable-setuid-sandbox', '--disable-blink-features=AutomationControlled']
+            args=[
+                '--no-sandbox',
+                '--disable-setuid-sandbox',
+                '--disable-blink-features=AutomationControlled',
+                '--disable-infobars'
+            ]
         )
         
         # [1] NETFLIX
