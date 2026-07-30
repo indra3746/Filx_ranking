@@ -1,10 +1,9 @@
 import os
 import time
 import datetime
-import requests
+import requests # 텔레그램 전송용
 from bs4 import BeautifulSoup
-from playwright.sync_api import sync_playwright
-from playwright_stealth import stealth_sync  # 🚨 스텔스 모듈 불러오기
+from curl_cffi import requests as curl_requests # 🚨 클라우드플레어 우회 전용!
 
 # 1. 한글 제목 매핑 DB
 KOR_MAP = {
@@ -33,53 +32,33 @@ def send_telegram(text):
         except Exception as e:
             print(f"전송 실패: {e}")
 
-# 3. 데이터 수집 함수 (Stealth 모드 완벽 적용)
-def fetch_rankings(browser, platform, loc="world"):
+# 3. 데이터 수집 함수 (curl_cffi 활용 초고속 우회)
+def fetch_rankings(platform, loc="world"):
     if platform == "hbo-max":
         p_ids = ["hbo", "max", "hbo-max"]
     else:
         p_ids = [platform]
         
-    context = browser.new_context(
-        user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
-        viewport={'width': 1920, 'height': 1080},
-        locale="en-US"
-    )
-    
-    page = context.new_page()
-    stealth_sync(page) # 🚨 봇 감지 시스템을 속이는 마법의 망토 착용!
-
     for pid in p_ids:
         url = f"https://flixpatrol.com/top10/{pid}/{loc}/"
         print(f"[{platform}] 접속 시도: {url}")
         
         try:
-            page.goto(url, wait_until="domcontentloaded", timeout=40000)
+            # 🚨 impersonate="chrome110" 옵션이 클라우드플레어를 완벽히 속입니다!
+            res = curl_requests.get(url, impersonate="chrome110", timeout=15)
             
-            # Cloudflare 인증 회피 대기 및 액션
-            page.wait_for_timeout(5000)
-            page.mouse.move(250, 350)
-            page.wait_for_timeout(3000)
-            
-            # 디버깅용: 현재 봇이 보고 있는 페이지의 진짜 제목 출력
-            print(f" └─ 현재 페이지 제목: {page.title()}")
-            
-            html_content = page.content()
-            soup = BeautifulSoup(html_content, 'html.parser')
-            
+            if res.status_code != 200:
+                print(f"⚠️ {pid} 응답 에러 (코드: {res.status_code})")
+                continue
+                
+            soup = BeautifulSoup(res.text, 'html.parser')
             movies = []
             tv = []
 
-            # 테이블 파싱
+            # 2. FlixPatrol 실시간 표(Table) 직관적 파싱
             tables = soup.find_all('table')
             
-            for tbl in tables:
-                parent_sec = tbl.find_parent(['div', 'section'])
-                sec_text = parent_sec.get_text(strip=True).lower() if parent_sec else ""
-                
-                is_movie = 'movie' in sec_text
-                is_tv = 'tv' in sec_text or 'show' in sec_text
-                
+            for idx, tbl in enumerate(tables):
                 parsed_list = []
                 for row in tbl.find_all('tr'):
                     cols = row.find_all('td')
@@ -98,24 +77,19 @@ def fetch_rankings(browser, platform, loc="world"):
                             if len(parsed_list) == 10:
                                 break
                 
+                # 첫 번째 표(idx=0)는 영화, 두 번째 표(idx=1)는 TV쇼로 담기
                 if parsed_list:
-                    if is_movie and not movies:
+                    if idx == 0 and not movies:
                         movies = parsed_list
-                    elif is_tv and not tv:
-                        tv = parsed_list
-                    elif not movies:
-                        movies = parsed_list
-                    elif not tv:
+                    elif idx == 1 and not tv:
                         tv = parsed_list
 
             if movies or tv:
-                context.close()
                 return {"movies": movies, "tv": tv}
 
         except Exception as e:
             print(f"⚠️ 에러 ({pid}): {e}")
             
-    context.close()
     return {"movies": [], "tv": []}
 
 # 4. 메시지 포맷팅
@@ -159,61 +133,48 @@ def main():
     
     print(f"--- 실행 ({time_str}) ---")
     
-    with sync_playwright() as p:
-        browser = p.chromium.launch(
-            headless=True,
-            args=[
-                '--no-sandbox',
-                '--disable-setuid-sandbox',
-                '--disable-blink-features=AutomationControlled',
-                '--disable-infobars',
-                '--window-size=1920,1080'
-            ]
-        )
+    # [1] NETFLIX
+    n_world = fetch_rankings("netflix", "world")
+    n_kr = fetch_rankings("netflix", "south-korea")
+    
+    m1 = f"🏆 **[1/3] NETFLIX 실시간 랭킹 ({time_str})**\n━━━━━━━━━━━━━━━━━━\n\n"
+    m1 += format_msg("NETFLIX Global", n_world, limit=10)
+    m1 += format_korea_ranking(n_kr)
+    m1 += "🔗 [상세보기](https://flixpatrol.com/top10/netflix/)\n"
+    
+    send_telegram(m1)
+    time.sleep(2)
+    
+    # [2] DISNEY+
+    d_world = fetch_rankings("disney", "world")
+    d_kr = fetch_rankings("disney", "south-korea") 
+    
+    m2 = f"🏆 **[2/3] DISNEY+ 실시간 랭킹 ({time_str})**\n━━━━━━━━━━━━━━━━━━\n\n"
+    m2 += format_msg("DISNEY+", d_world, limit=10)
+    m2 += format_korea_ranking(d_kr) 
+    m2 += "🔗 [상세보기](https://flixpatrol.com/top10/disney/)\n" 
+    
+    send_telegram(m2)
+    time.sleep(2)
+    
+    # [3] 기타 (HBO MAX, AMAZON, APPLE)
+    m3 = f"🏆 **[3/3] 기타 OTT 통합 랭킹 ({time_str})**\n━━━━━━━━━━━━━━━━━━\n\n"
+    
+    hbo = fetch_rankings("hbo-max", "world")
+    if hbo['movies'] or hbo['tv']: 
+        m3 += format_msg("HBO MAX", hbo, limit=5)
+    
+    amz = fetch_rankings("amazon-prime", "world")
+    if amz['movies'] or amz['tv']: 
+        m3 += format_msg("AMAZON PRIME", amz, limit=5)
         
-        # [1] NETFLIX
-        n_world = fetch_rankings(browser, "netflix", "world")
-        n_kr = fetch_rankings(browser, "netflix", "south-korea")
-        
-        m1 = f"🏆 **[1/3] NETFLIX 실시간 랭킹 ({time_str})**\n━━━━━━━━━━━━━━━━━━\n\n"
-        m1 += format_msg("NETFLIX Global", n_world, limit=10)
-        m1 += format_korea_ranking(n_kr)
-        m1 += "🔗 [상세보기](https://flixpatrol.com/top10/netflix/)\n"
-        
-        send_telegram(m1)
-        time.sleep(3)
-        
-        # [2] DISNEY+
-        d_world = fetch_rankings(browser, "disney", "world")
-        d_kr = fetch_rankings(browser, "disney", "south-korea") 
-        
-        m2 = f"🏆 **[2/3] DISNEY+ 실시간 랭킹 ({time_str})**\n━━━━━━━━━━━━━━━━━━\n\n"
-        m2 += format_msg("DISNEY+", d_world, limit=10)
-        m2 += format_korea_ranking(d_kr) 
-        m2 += "🔗 [상세보기](https://flixpatrol.com/top10/disney/)\n" 
-        
-        send_telegram(m2)
-        time.sleep(3)
-        
-        # [3] 기타 (HBO MAX, AMAZON, APPLE)
-        m3 = f"🏆 **[3/3] 기타 OTT 통합 랭킹 ({time_str})**\n━━━━━━━━━━━━━━━━━━\n\n"
-        
-        hbo = fetch_rankings(browser, "hbo-max", "world")
-        if hbo['movies'] or hbo['tv']: 
-            m3 += format_msg("HBO MAX", hbo, limit=5)
-        
-        amz = fetch_rankings(browser, "amazon-prime", "world")
-        if amz['movies'] or amz['tv']: 
-            m3 += format_msg("AMAZON PRIME", amz, limit=5)
-            
-        app = fetch_rankings(browser, "apple-tv", "world")
-        if app['movies'] or app['tv']:
-            m3 += format_msg("APPLE TV+", app, limit=5)
-        
-        send_telegram(m3)
-        
-        browser.close()
-        print("--- 완료 ---")
+    app = fetch_rankings("apple-tv", "world")
+    if app['movies'] or app['tv']:
+        m3 += format_msg("APPLE TV+", app, limit=5)
+    
+    send_telegram(m3)
+    
+    print("--- 완료 ---")
 
 if __name__ == "__main__":
     main()
