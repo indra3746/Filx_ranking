@@ -55,7 +55,7 @@ def fetch_rankings(platform, loc="world"):
                                 href = link.get('href', '')
                                 slug = href.split('/')[-2] if '/' in href else ""
                                 raw_title = link.get_text(strip=True) or link.get('title', '')
-                                title = KOR_MAP.get(slug, raw_title)
+                                title = raw_title
                                 if title:
                                     parsed_list.append(f"{rank}위 {title}")
                             if len(parsed_list) == 10:
