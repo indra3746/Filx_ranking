@@ -39,13 +39,17 @@ def fetch_rankings(platform, loc="world"):
     else:
         p_ids = [platform]
         
-    for pid in p_ids:
+for pid in p_ids:
         url = f"https://flixpatrol.com/top10/{pid}/{loc}/"
         print(f"[{platform}] 접속 시도: {url}")
         
         try:
-            # 🚨 impersonate="chrome110" 옵션이 클라우드플레어를 완벽히 속입니다!
-            res = curl_requests.get(url, impersonate="chrome110", timeout=15)
+            # 💡 사람 브라우저처럼 보이기 위한 헤더 추가
+            headers = {
+                "Accept-Language": "ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7",
+            }
+            # 🚨 chrome110 대신 최신 버전인 chrome124로 위장!
+            res = curl_requests.get(url, impersonate="chrome124", headers=headers, timeout=15)
             
             if res.status_code != 200:
                 print(f"⚠️ {pid} 응답 에러 (코드: {res.status_code})")
