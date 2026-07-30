@@ -4,6 +4,7 @@ import datetime
 import requests
 from bs4 import BeautifulSoup
 from playwright.sync_api import sync_playwright
+from playwright_stealth import stealth_sync  # 🚨 스텔스 모듈 불러오기
 
 # 1. 한글 제목 매핑 DB
 KOR_MAP = {
@@ -32,7 +33,7 @@ def send_telegram(text):
         except Exception as e:
             print(f"전송 실패: {e}")
 
-# 3. 데이터 수집 함수 (Cloudflare 우회 및 정확한 HTML 파싱 적용)
+# 3. 데이터 수집 함수 (Stealth 모드 완벽 적용)
 def fetch_rankings(browser, platform, loc="world"):
     if platform == "hbo-max":
         p_ids = ["hbo", "max", "hbo-max"]
@@ -45,24 +46,23 @@ def fetch_rankings(browser, platform, loc="world"):
         locale="en-US"
     )
     
-    # Cloudflare 봇 감지 무력화 스크립트
-    context.add_init_script("""
-        Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
-        window.chrome = { runtime: {} };
-    """)
     page = context.new_page()
+    stealth_sync(page) # 🚨 봇 감지 시스템을 속이는 마법의 망토 착용!
 
     for pid in p_ids:
         url = f"https://flixpatrol.com/top10/{pid}/{loc}/"
-        print(f"[{platform}] Playwright 접속 시도: {url}")
+        print(f"[{platform}] 접속 시도: {url}")
         
         try:
-            # 1. 페이지 접속 및 Cloudflare 챌린지 통과 대기
-            page.goto(url, wait_until="domcontentloaded", timeout=30000)
+            page.goto(url, wait_until="domcontentloaded", timeout=40000)
             
-            # Cloudflare 감지 해제를 위한 7초 대기 + 미세 마우스 조작
-            page.wait_for_timeout(7000)
-            page.mouse.move(200, 300)
+            # Cloudflare 인증 회피 대기 및 액션
+            page.wait_for_timeout(5000)
+            page.mouse.move(250, 350)
+            page.wait_for_timeout(3000)
+            
+            # 디버깅용: 현재 봇이 보고 있는 페이지의 진짜 제목 출력
+            print(f" └─ 현재 페이지 제목: {page.title()}")
             
             html_content = page.content()
             soup = BeautifulSoup(html_content, 'html.parser')
@@ -70,11 +70,10 @@ def fetch_rankings(browser, platform, loc="world"):
             movies = []
             tv = []
 
-            # 2. FlixPatrol 실시간 표(Table) 파싱 (정확한 클래스/셀렉터 접근)
+            # 테이블 파싱
             tables = soup.find_all('table')
             
             for tbl in tables:
-                # 표 바로 위에 있는 제목/카테고리 텍스트 확인
                 parent_sec = tbl.find_parent(['div', 'section'])
                 sec_text = parent_sec.get_text(strip=True).lower() if parent_sec else ""
                 
@@ -166,7 +165,9 @@ def main():
             args=[
                 '--no-sandbox',
                 '--disable-setuid-sandbox',
-                '--disable-blink-features=AutomationControlled'
+                '--disable-blink-features=AutomationControlled',
+                '--disable-infobars',
+                '--window-size=1920,1080'
             ]
         )
         
