@@ -1,8 +1,9 @@
-import cloudscraper # 🚨 requests 대신 우회 전용 scraper 사용
-from bs4 import BeautifulSoup
-import datetime
 import os
 import time
+import datetime
+import requests
+from bs4 import BeautifulSoup
+from playwright.sync_api import sync_playwright
 
 # 1. 한글 제목 매핑 DB
 KOR_MAP = {
@@ -27,39 +28,36 @@ def send_telegram(text):
     if token and chat_id and len(text) > 10:
         try:
             url = f"https://api.telegram.org/bot{token}/sendMessage"
-            scraper = cloudscraper.create_scraper()
-            scraper.post(url, json={"chat_id": chat_id, "text": text, "parse_mode": "Markdown", "disable_web_page_preview": True})
+            requests.post(url, json={"chat_id": chat_id, "text": text, "parse_mode": "Markdown", "disable_web_page_preview": True})
         except Exception as e:
             print(f"전송 실패: {e}")
 
-# 3. 데이터 수집 함수 (우회 옵션 강화 적용!)
-def fetch_rankings(platform, loc="world"):
+# 3. 데이터 수집 함수 (Playwright 가상 브라우저 활용)
+def fetch_rankings(browser, platform, loc="world"):
     if platform == "hbo-max":
         p_ids = ["hbo", "max", "hbo-max"]
     else:
         p_ids = [platform]
         
-    # 🚨 Cloudflare 보안 통과율을 높이기 위한 브라우저 위장 옵션 세팅
-    scraper = cloudscraper.create_scraper(
-        browser={
-            'browser': 'chrome',
-            'platform': 'windows',
-            'desktop': True
-        },
-        delay=10
+    context = browser.new_context(
+        user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36"
     )
-    
+    page = context.new_page()
+
     for pid in p_ids:
         url = f"https://flixpatrol.com/top10/{pid}/{loc}/"
         print(f"[{platform}] 접속 시도: {url}")
         
         try:
-            res = scraper.get(url, timeout=20)
-            if res.status_code != 200:
-                print(f"⚠️ {pid} 경로 응답 없음 ({res.status_code})")
+            response = page.goto(url, wait_until="domcontentloaded", timeout=30000)
+            page.wait_for_timeout(3000) # 보안 차단막 해제 대기
+            
+            if response and response.status != 200:
+                print(f"⚠️ {pid} 경로 응답 없음 ({response.status})")
                 continue
             
-            soup = BeautifulSoup(res.text, 'html.parser')
+            html_content = page.content()
+            soup = BeautifulSoup(html_content, 'html.parser')
             
             movies = []
             tv = []
@@ -106,49 +104,13 @@ def fetch_rankings(platform, loc="world"):
                     tv = current_list
                     
             if movies or tv:
-                return {"movies": movies, "tv": tv}
-                
-            # [안전장치]
-            all_rows = soup.find_all('tr')
-            current_list = []
-            list_count = 0 
-            for row in all_rows:
-                cols = row.find_all('td')
-                if len(cols) >= 2:
-                    rank_txt = cols[0].get_text(strip=True).replace(".", "")
-                    if rank_txt.isdigit():
-                        rank = int(rank_txt)
-                        
-                        if rank == 1 and current_list:
-                            if list_count == 0: movies = current_list[:]
-                            elif list_count == 1: tv = current_list[:]
-                            current_list = []
-                            list_count += 1
-                        
-                        link = row.find('a')
-                        title_txt = "-"
-                        if link:
-                            try:
-                                slug = link.get('href', '').split('/')[-2]
-                            except:
-                                slug = ""
-                            raw = link.get_text(strip=True) or link.get('title') or slug.replace('-', ' ').title()
-                            title_txt = KOR_MAP.get(slug, raw)
-                        else:
-                            title_txt = cols[1].get_text(strip=True)
-
-                        current_list.append(f"{rank}위 {title_txt}")
-
-            if current_list:
-                if list_count == 0: movies = current_list
-                elif list_count == 1: tv = current_list
-                
-            if movies or tv:
+                context.close()
                 return {"movies": movies, "tv": tv}
 
         except Exception as e:
             print(f"⚠️ 에러 ({pid}): {e}")
             
+    context.close()
     return {"movies": [], "tv": []}
 
 # 4. 메시지 포맷팅
@@ -192,47 +154,53 @@ def main():
     
     print(f"--- 실행 ({time_str}) ---")
     
-    # [1] NETFLIX
-    n_world = fetch_rankings("netflix", "world")
-    n_kr = fetch_rankings("netflix", "south-korea")
-    
-    m1 = f"🏆 **[1/3] NETFLIX 실시간 랭킹 ({time_str})**\n━━━━━━━━━━━━━━━━━━\n\n"
-    m1 += format_msg("NETFLIX Global", n_world, limit=10)
-    m1 += format_korea_ranking(n_kr)
-    m1 += "🔗 [상세보기](https://flixpatrol.com/top10/netflix/)\n"
-    
-    send_telegram(m1)
-    time.sleep(3)
-    
-    # [2] DISNEY+
-    d_world = fetch_rankings("disney", "world")
-    d_kr = fetch_rankings("disney", "south-korea") 
-    
-    m2 = f"🏆 **[2/3] DISNEY+ 실시간 랭킹 ({time_str})**\n━━━━━━━━━━━━━━━━━━\n\n"
-    m2 += format_msg("DISNEY+", d_world, limit=10)
-    m2 += format_korea_ranking(d_kr) 
-    m2 += "🔗 [상세보기](https://flixpatrol.com/top10/disney/)\n" 
-    
-    send_telegram(m2)
-    time.sleep(3)
-    
-    # [3] 기타 (HBO MAX, AMAZON, APPLE)
-    m3 = f"🏆 **[3/3] 기타 OTT 통합 랭킹 ({time_str})**\n━━━━━━━━━━━━━━━━━━\n\n"
-    
-    hbo = fetch_rankings("hbo-max", "world")
-    if hbo['movies'] or hbo['tv']: 
-        m3 += format_msg("HBO MAX", hbo, limit=5)
-    
-    amz = fetch_rankings("amazon-prime", "world")
-    if amz['movies'] or amz['tv']: 
-        m3 += format_msg("AMAZON PRIME", amz, limit=5)
+    with sync_playwright() as p:
+        # 가상 크롬 브라우저 실행
+        browser = p.chromium.launch(headless=True)
         
-    app = fetch_rankings("apple-tv", "world")
-    if app['movies'] or app['tv']:
-        m3 += format_msg("APPLE TV+", app, limit=5)
-    
-    send_telegram(m3)
-    print("--- 완료 ---")
+        # [1] NETFLIX
+        n_world = fetch_rankings(browser, "netflix", "world")
+        n_kr = fetch_rankings(browser, "netflix", "south-korea")
+        
+        m1 = f"🏆 **[1/3] NETFLIX 실시간 랭킹 ({time_str})**\n━━━━━━━━━━━━━━━━━━\n\n"
+        m1 += format_msg("NETFLIX Global", n_world, limit=10)
+        m1 += format_korea_ranking(n_kr)
+        m1 += "🔗 [상세보기](https://flixpatrol.com/top10/netflix/)\n"
+        
+        send_telegram(m1)
+        time.sleep(3)
+        
+        # [2] DISNEY+
+        d_world = fetch_rankings(browser, "disney", "world")
+        d_kr = fetch_rankings(browser, "disney", "south-korea") 
+        
+        m2 = f"🏆 **[2/3] DISNEY+ 실시간 랭킹 ({time_str})**\n━━━━━━━━━━━━━━━━━━\n\n"
+        m2 += format_msg("DISNEY+", d_world, limit=10)
+        m2 += format_korea_ranking(d_kr) 
+        m2 += "🔗 [상세보기](https://flixpatrol.com/top10/disney/)\n" 
+        
+        send_telegram(m2)
+        time.sleep(3)
+        
+        # [3] 기타 (HBO MAX, AMAZON, APPLE)
+        m3 = f"🏆 **[3/3] 기타 OTT 통합 랭킹 ({time_str})**\n━━━━━━━━━━━━━━━━━━\n\n"
+        
+        hbo = fetch_rankings(browser, "hbo-max", "world")
+        if hbo['movies'] or hbo['tv']: 
+            m3 += format_msg("HBO MAX", hbo, limit=5)
+        
+        amz = fetch_rankings(browser, "amazon-prime", "world")
+        if amz['movies'] or amz['tv']: 
+            m3 += format_msg("AMAZON PRIME", amz, limit=5)
+            
+        app = fetch_rankings(browser, "apple-tv", "world")
+        if app['movies'] or app['tv']:
+            m3 += format_msg("APPLE TV+", app, limit=5)
+        
+        send_telegram(m3)
+        
+        browser.close()
+        print("--- 완료 ---")
 
 if __name__ == "__main__":
     main()
