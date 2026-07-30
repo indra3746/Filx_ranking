@@ -32,7 +32,7 @@ def send_telegram(text):
         except Exception as e:
             print(f"전송 실패: {e}")
 
-# 3. 데이터 수집 함수 (FlixPatrol 최신 구조 대응 및 강화된 우회)
+# 3. 데이터 수집 함수 (타임아웃 에러 원인이었던 networkidle 제거!)
 def fetch_rankings(browser, platform, loc="world"):
     if platform == "hbo-max":
         p_ids = ["hbo", "max", "hbo-max"]
@@ -45,7 +45,6 @@ def fetch_rankings(browser, platform, loc="world"):
         locale="en-US"
     )
     
-    # 봇 감지 메커니즘 무력화
     context.add_init_script("""
         Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
         window.chrome = { runtime: {} };
@@ -57,8 +56,9 @@ def fetch_rankings(browser, platform, loc="world"):
         print(f"[{platform}] Playwright 접속 시도: {url}")
         
         try:
-            page.goto(url, wait_until="networkidle", timeout=45000)
-            page.wait_for_timeout(4000)
+            # 🚨 networkidle 대신 domcontentloaded 로 변경하여 45초 갇힘 현상 해결!
+            page.goto(url, wait_until="domcontentloaded", timeout=20000)
+            page.wait_for_timeout(3000) # 보안 차단 해제 대기
             
             html_content = page.content()
             soup = BeautifulSoup(html_content, 'html.parser')
@@ -67,19 +67,12 @@ def fetch_rankings(browser, platform, loc="world"):
             tv = []
             
             # [전략 1] 카드형/그리드형 또는 테이블 구조 탐색
-            # 링크(a 태그) 중 /title/ 경로를 포함하는 순위 데이터 파싱
-            rank_items = soup.find_all(['tr', 'div', 'li'])
-            
+            sections = soup.find_all(['div', 'section', 'article', 'tr'])
             temp_movies = []
             temp_tv = []
-            current_category = None
             
-            # 카테고리 헤더 탐색
-            sections = soup.find_all(['div', 'section', 'article'])
             for sec in sections:
                 sec_text = sec.get_text(strip=True).lower()
-                
-                # 영화/TV 영역 구분
                 links = sec.find_all('a')
                 valid_links = []
                 for a in links:
@@ -95,7 +88,7 @@ def fetch_rankings(browser, platform, loc="world"):
                     elif ('tv' in sec_text or 'show' in sec_text) and not temp_tv:
                         temp_tv = valid_links[:10]
 
-            # [전략 2] 기존 테이블 구조 백업 파싱
+            # [전략 2] 기존 헤더/테이블 백업 파싱
             if not temp_movies and not temp_tv:
                 for header in soup.find_all(['h1', 'h2', 'h3', 'h4', 'div']):
                     h_text = header.get_text(strip=True).lower()
@@ -116,7 +109,6 @@ def fetch_rankings(browser, platform, loc="world"):
                         elif 'tv' in h_text and not temp_tv:
                             temp_tv = parsed
 
-            # 번호 매기기 포맷 적용
             if temp_movies:
                 movies = [f"{idx+1}위 {title}" for idx, title in enumerate(temp_movies)]
             if temp_tv:
@@ -179,8 +171,7 @@ def main():
             args=[
                 '--no-sandbox',
                 '--disable-setuid-sandbox',
-                '--disable-blink-features=AutomationControlled',
-                '--disable-infobars'
+                '--disable-blink-features=AutomationControlled'
             ]
         )
         
