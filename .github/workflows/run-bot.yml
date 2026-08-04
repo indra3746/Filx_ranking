@@ -2,7 +2,6 @@ name: OTT Ranking Bot
 
 on:
   schedule:
-    # 💡 UTC 23:20 = KST(한국 시간) 매일 오전 08:20
     - cron: '20 23 * * *'
   workflow_dispatch:
 
@@ -22,8 +21,7 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install requests beautifulsoup4 playwright
-          playwright install --with-deps chromium
+          pip install requests beautifulsoup4
 
       - name: Run script with retry
         uses: nick-fields/retry@v3
@@ -35,3 +33,4 @@ jobs:
         env:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           CHAT_ID: ${{ secrets.CHAT_ID }}
+          SCRAPER_API_KEY: ${{ secrets.SCRAPER_API_KEY }}
