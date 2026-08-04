@@ -3,6 +3,7 @@ import sys
 import time
 import datetime
 import requests
+import cloudscraper
 from bs4 import BeautifulSoup
 from concurrent.futures import ThreadPoolExecutor
 
@@ -22,28 +23,25 @@ def send_telegram(text):
         except Exception as e:
             print(f"전송 실패: {e}")
 
-# 2. 데이터 수집 함수 (ScraperAPI + render=true 우회)
+# 2. 데이터 수집 함수 (cloudscraper 기반 Cloudflare 우회)
 def fetch_rankings(platform, loc="world"):
-    scraper_api_key = os.environ.get("SCRAPER_API_KEY")
-    
     if platform == "hbo-max":
         p_ids = ["max", "hbo"]
     else:
         p_ids = [platform]
 
+    # Cloudflare 챌린지를 자동으로 통과하는 scraper 생성
+    scraper = cloudscraper.create_scraper(
+        browser={'browser': 'chrome', 'platform': 'windows', 'desktop': True}
+    )
+
     for pid in p_ids:
         target_url = f"https://flixpatrol.com/top10/{pid}/{loc}/"
-        print(f"[{platform}] ScraperAPI 접속 시도: {target_url}")
+        print(f"[{platform}] 접속 시도: {target_url}")
         
         for attempt in range(3):
             try:
-                # 💡 render: 'true'를 추가하여 Cloudflare 봇 차단을 완벽 우회합니다.
-                payload = {
-                    'api_key': scraper_api_key, 
-                    'url': target_url,
-                    'render': 'true'
-                }
-                res = requests.get('http://api.scraperapi.com', params=payload, timeout=60)
+                res = scraper.get(target_url, timeout=15)
                 
                 if res.status_code == 200:
                     soup = BeautifulSoup(res.text, 'html.parser')
@@ -74,12 +72,9 @@ def fetch_rankings(platform, loc="world"):
                     if movies or tv:
                         return {"movies": movies, "tv": tv}
                     break
-                elif res.status_code == 500:
-                    print(f"⚠️ {pid} 서버 일시 장애(500). ({attempt+1}/3 재시도 중...)")
-                    time.sleep(3)
                 else:
-                    print(f"⚠️ {pid} 응답 에러 (코드: {res.status_code})")
-                    break
+                    print(f"⚠️ {pid} 응답 에러 (코드: {res.status_code}) ({attempt+1}/3 재시도)")
+                    time.sleep(2)
 
             except Exception as e:
                 print(f"⚠️ 에러 ({pid}): {e}")
@@ -118,12 +113,12 @@ def format_korea_ranking(data):
             msg += "\n".join([f" {x}" for x in data['tv'][:10]]) + "\n\n" 
     return msg
 
-# 4. 메인 실행 함수 (ScraperAPI 한도 고려 병렬 처리)
+# 4. 메인 실행 함수 (병렬 수집)
 def main():
     now = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(hours=9)
     time_str = now.strftime("%y.%m.%d %H:%M")
     
-    print(f"--- ⚡ ScraperAPI 병렬 수집 시작 ({time_str}) ---")
+    print(f"--- 🚀 영구 무료 초고속 수집 시작 ({time_str}) ---")
     
     tasks = {
         "n_world": ("netflix", "world"),
@@ -136,7 +131,6 @@ def main():
     }
     
     results = {}
-    # ScraperAPI 동시 요청 한도(5개)에 맞춰 안전하게 병렬 처리
     with ThreadPoolExecutor(max_workers=5) as executor:
         future_to_key = {
             executor.submit(fetch_rankings, platform, loc): key 
@@ -154,7 +148,7 @@ def main():
     n_kr = results["n_kr"]
     
     if not n_world['movies'] and not n_world['tv']:
-        print("❌ NETFLIX 데이터 수집 실패! (10분 뒤 재시도 실행)")
+        print("❌ NETFLIX 데이터 수집 실패! (10분 뒤 자동 재시도)")
         sys.exit(1)
         
     m1 = f"🏆 <b>[1/3] NETFLIX 실시간 랭킹 ({time_str})</b>\n━━━━━━━━━━━━━━━━━━\n\n"
@@ -182,7 +176,7 @@ def main():
         if app['movies'] or app['tv']: m3 += format_msg("APPLE TV+", app, limit=5)
         send_telegram(m3)
         
-    print("--- 완료 ---")
+    print("--- 🏁 수집 완료 ---")
 
 if __name__ == "__main__":
     main()
