@@ -3,9 +3,8 @@ import sys
 import time
 import datetime
 import requests
-import cloudscraper
 from bs4 import BeautifulSoup
-from concurrent.futures import ThreadPoolExecutor
+from playwright.sync_api import sync_playwright
 
 # 1. 텔레그램 전송 함수
 def send_telegram(text):
@@ -23,28 +22,27 @@ def send_telegram(text):
         except Exception as e:
             print(f"전송 실패: {e}")
 
-# 2. 데이터 수집 함수 (cloudscraper 기반 Cloudflare 우회)
-def fetch_rankings(platform, loc="world"):
+# 2. 데이터 수집 함수 (Playwright 브라우저 직접 제어)
+def fetch_rankings(page, platform, loc="world"):
     if platform == "hbo-max":
         p_ids = ["max", "hbo"]
     else:
         p_ids = [platform]
 
-    # Cloudflare 챌린지를 자동으로 통과하는 scraper 생성
-    scraper = cloudscraper.create_scraper(
-        browser={'browser': 'chrome', 'platform': 'windows', 'desktop': True}
-    )
-
     for pid in p_ids:
         target_url = f"https://flixpatrol.com/top10/{pid}/{loc}/"
-        print(f"[{platform}] 접속 시도: {target_url}")
+        print(f"[{platform}] 브라우저 접속 시도: {target_url}")
         
         for attempt in range(3):
             try:
-                res = scraper.get(target_url, timeout=15)
+                # 실제 브라우저로 접속
+                response = page.goto(target_url, timeout=30000, wait_until="domcontentloaded")
+                time.sleep(1.5) # Cloudflare / JS 렌더링 안정화 대기
                 
-                if res.status_code == 200:
-                    soup = BeautifulSoup(res.text, 'html.parser')
+                status = response.status if response else 0
+                if status == 200:
+                    html_content = page.content()
+                    soup = BeautifulSoup(html_content, 'html.parser')
                     movies, tv = [], []
 
                     tables = soup.find_all('table')
@@ -73,7 +71,7 @@ def fetch_rankings(platform, loc="world"):
                         return {"movies": movies, "tv": tv}
                     break
                 else:
-                    print(f"⚠️ {pid} 응답 에러 (코드: {res.status_code}) ({attempt+1}/3 재시도)")
+                    print(f"⚠️ {pid} 응답 에러 (코드: {status}) ({attempt+1}/3 재시도)")
                     time.sleep(2)
 
             except Exception as e:
@@ -113,12 +111,12 @@ def format_korea_ranking(data):
             msg += "\n".join([f" {x}" for x in data['tv'][:10]]) + "\n\n" 
     return msg
 
-# 4. 메인 실행 함수 (병렬 수집)
+# 4. 메인 실행 함수
 def main():
     now = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(hours=9)
     time_str = now.strftime("%y.%m.%d %H:%M")
     
-    print(f"--- 🚀 영구 무료 초고속 수집 시작 ({time_str}) ---")
+    print(f"--- 🚀 Playwright 무제한 무상 수집 시작 ({time_str}) ---")
     
     tasks = {
         "n_world": ("netflix", "world"),
@@ -131,17 +129,23 @@ def main():
     }
     
     results = {}
-    with ThreadPoolExecutor(max_workers=5) as executor:
-        future_to_key = {
-            executor.submit(fetch_rankings, platform, loc): key 
-            for key, (platform, loc) in tasks.items()
-        }
-        for future in future_to_key:
-            key = future_to_key[future]
-            try:
-                results[key] = future.result()
-            except Exception as e:
-                results[key] = {"movies": [], "tv": []}
+
+    # 헤드리스 크롬 브라우저 구동
+    with sync_playwright() as p:
+        browser = p.chromium.launch(
+            headless=True,
+            args=["--no-sandbox", "--disable-setuid-sandbox"]
+        )
+        context = browser.new_context(
+            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        )
+        page = context.new_page()
+
+        for key, (platform, loc) in tasks.items():
+            results[key] = fetch_rankings(page, platform, loc)
+            time.sleep(1) # 안정적인 수집을 위한 간격
+
+        browser.close()
 
     # [1] NETFLIX
     n_world = results["n_world"]
@@ -176,7 +180,7 @@ def main():
         if app['movies'] or app['tv']: m3 += format_msg("APPLE TV+", app, limit=5)
         send_telegram(m3)
         
-    print("--- 🏁 수집 완료 ---")
+    print("--- 🏁 수집 및 전송 완료 ---")
 
 if __name__ == "__main__":
     main()
