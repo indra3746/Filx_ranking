@@ -22,7 +22,7 @@ def send_telegram(text):
         except Exception as e:
             print(f"전송 실패: {e}")
 
-# 2. 데이터 수집 함수 (ScraperAPI + render=true 우회)
+# 2. 데이터 수집 함수 (ScraperAPI 순수 프록시 - render 옵션 제거)
 def fetch_rankings(platform, loc="world"):
     scraper_api_key = os.environ.get("SCRAPER_API_KEY")
     
@@ -37,11 +37,10 @@ def fetch_rankings(platform, loc="world"):
         
         for attempt in range(3):
             try:
-                # 💡 render: 'true'를 추가하여 Cloudflare 봇 차단을 완벽 우회합니다.
+                # 💡 render: 'true'를 제거하여 ScraperAPI 500 에러 방지 및 속도 극대화
                 payload = {
                     'api_key': scraper_api_key, 
-                    'url': target_url,
-                    'render': 'true'
+                    'url': target_url
                 }
                 res = requests.get('http://api.scraperapi.com', params=payload, timeout=60)
                 
