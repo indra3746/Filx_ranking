@@ -2,7 +2,9 @@ name: OTT Ranking Bot
 
 on:
   schedule:
-    - cron: '0 0 * * *'
+    # 💡 UTC 23:20 = KST(한국 시간) 매일 오전 08:20 
+    # (정각을 피해서 대기열 지연을 최소화합니다)
+    - cron: '20 23 * * *'
   workflow_dispatch:
 
 jobs:
@@ -23,9 +25,15 @@ jobs:
           python -m pip install --upgrade pip
           pip install requests beautifulsoup4
 
-      - name: Run script
+      # 🚨 실패 시 10분 대기 후 최대 3번 자동 재시도
+      - name: Run script with retry
+        uses: nick-fields/retry@v3
+        with:
+          timeout_minutes: 35
+          max_attempts: 3
+          retry_wait_seconds: 600
+          command: python main.py
         env:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           CHAT_ID: ${{ secrets.CHAT_ID }}
           SCRAPER_API_KEY: ${{ secrets.SCRAPER_API_KEY }}
-        run: python main.py
